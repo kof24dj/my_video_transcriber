@@ -33,7 +33,6 @@ def upload_video():
 
     mode = request.form.get('mode', 'transcribe')
 
-    # ✨ 使用經典版 SDK 初始化設定
     try:
         genai.configure(api_key=api_key)
     except Exception as e:
@@ -59,13 +58,11 @@ def upload_video():
 
         print(f"準備上傳，暴力綁定 MIME Type: {mime_type}")
         
-        # ✨ 經典版 SDK 寫法：直接明確傳入 path 與 mime_type，絕不報錯
         uploaded_file = genai.upload_file(path=local_video_path, mime_type=mime_type)
         
         print("影片已成功送達，等待處理...")
         timeout_counter = 0
         
-        # 經典版 SDK 的狀態讀取
         while uploaded_file.state.name == "PROCESSING":
             if timeout_counter > 90:
                 raise Exception("Gemini 處理影片超時。")
@@ -84,24 +81,26 @@ def upload_video():
             "如果你發現這個檔案完全沒有聲音，或者因為格式問題讓你聽不到任何內容，請『不要輸出任何時間軸』，直接回傳這句話：『❌ 系統偵測：檔案讀取失敗或音軌為空。請確認影片格式與聲音是否正常。』\n\n"
         )
 
+        # ✨【核心修正：加入極短句限制與強制字數規定】
         if mode == "translate_en_zh":
             prompt = (
                 guardrail_instruction +
                 "請聽這段英文語音，並直接翻譯成『繁體中文（台灣習慣用語）』字幕。\n"
-                "以『單個句子』為單位精細切分時間軸，只要有停頓或換句就必須分割！\n"
+                "【極短句強制切分】：為了讓字幕在畫面上好閱讀，每行中文字幕『絕對不可超過 15 個字』！\n"
+                "遇到較長的句子時，請務必根據語氣、逗號、或講話的微小停頓，將其強制切斷為多個超短句，並分別給予獨立的時間軸。\n"
                 "格式：\n"
-                "[HH:MM:SS - HH:MM:SS] 中文翻譯\n"
+                "[HH:MM:SS - HH:MM:SS] 短句中文翻譯\n"
             )
         else:
             prompt = (
                 guardrail_instruction +
                 "請將這段影片轉成逐字稿。\n"
-                "以『單個句子』為單位精細切分時間軸，只要有停頓或換句就必須分割！\n"
+                "【極短句強制切分】：為了讓字幕在畫面上好閱讀，每行字幕『絕對不可超過 15 個字』！\n"
+                "遇到較長的句子時，請務必根據語氣、逗號、或講話的微小停頓，將其強制切斷為多個超短句，並分別給予獨立的時間軸。\n"
                 "格式：\n"
-                "[HH:MM:SS - HH:MM:SS] 第一句話\n"
+                "[HH:MM:SS - HH:MM:SS] 超短句話語\n"
             )
 
-        # ✨ 經典版 SDK 的模型呼叫寫法
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content([uploaded_file, prompt])
 

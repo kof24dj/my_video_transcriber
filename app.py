@@ -38,10 +38,16 @@ def upload_video():
     
     video_file.save(local_video_path)
     uploaded_file = None
-    
     try:
         print(f"正在將影片上傳至 Gemini 伺服器...")
-        uploaded_file = client.files.upload(file=local_video_path)
+        # ✨ 為了相容不同版本的 Google SDK，我們使用多重嘗試機制
+        try:
+            uploaded_file = client.files.upload(file=local_video_path)
+        except TypeError:
+            try:
+                uploaded_file = client.files.upload(path=local_video_path)
+            except TypeError:
+                uploaded_file = client.files.upload(local_video_path)
         
         print("等待 Gemini 處理影片中...")
         while uploaded_file.state.name == "PROCESSING":

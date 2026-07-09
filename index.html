@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>影片語音轉文字 (團隊雲端版)</title>
+    <title>影片語音轉文字 (團隊雲端多功能版)</title>
     <style>
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -23,29 +23,29 @@
         }
         h1 { font-size: 1.5rem; color: #333; margin-bottom: 1.5rem; }
         
-        /* 新增 API Key 輸入框樣式 */
-        .api-key-group {
-            margin-bottom: 1.5rem;
+        .input-group {
+            margin-bottom: 1.2rem;
             text-align: left;
         }
-        .api-key-group label {
+        .input-group label {
             display: block;
             margin-bottom: 0.5rem;
             color: #555;
             font-weight: bold;
         }
-        .api-key-group input[type="password"] {
+        .input-group input[type="password"], .input-group select {
             width: 100%;
             padding: 0.75rem;
             border: 1px solid #ccc;
             border-radius: 6px;
             box-sizing: border-box;
-            font-family: monospace;
+            font-size: 1rem;
         }
+        .input-group input[type="password"] { font-family: monospace; }
 
         input[type="file"] { 
             display: block; 
-            margin: 0 auto 1.5rem auto; 
+            margin: 1.5rem auto; 
             padding: 0.5rem;
         }
         button { 
@@ -92,11 +92,19 @@
 </head>
 <body>
     <div class="container">
-        <h1>上傳影片產生逐字稿</h1>
+        <h1>上傳影片產生逐字稿 / 字幕</h1>
         <form id="uploadForm">
-            <div class="api-key-group">
+            <div class="input-group">
                 <label for="apiKey">🔑 請輸入您的 Gemini API Key：</label>
                 <input type="password" id="apiKey" name="apiKey" placeholder="AIzaSy..." required>
+            </div>
+
+            <div class="input-group">
+                <label for="mode">🌐 請選擇處理模式：</label>
+                <select id="mode" name="mode">
+                    <option value="transcribe">聽寫逐字稿 (原本說什麼語言，就出什麼語言)</option>
+                    <option value="translate_en_zh">英翻中字幕 (聽英文語音，直接輸出繁體中文字幕)</option>
+                </select>
             </div>
 
             <input type="file" id="videoFile" accept="video/*,audio/*" required>
@@ -127,18 +135,20 @@
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const fileInput = document.getElementById('videoFile');
-            const apiKeyInput = document.getElementById('apiKey'); // 取得 API Key
+            const apiKeyInput = document.getElementById('apiKey');
+            const modeInput = document.getElementById('mode'); // 取得選單模式
 
             if (fileInput.files.length === 0) return;
 
             const formData = new FormData();
             formData.append('video', fileInput.files[0]);
-            formData.append('api_key', apiKeyInput.value.trim()); // ✨ 將 API Key 包裝送出
+            formData.append('api_key', apiKeyInput.value.trim());
+            formData.append('mode', modeInput.value); // ✨ 送出模式
 
             submitBtn.disabled = true;
             previewContainer.style.display = 'none';
             statusDiv.style.color = '#555';
-            statusDiv.innerHTML = 'AI 正在努力聽寫中...<br>這可能需要幾分鐘的時間，請勿關閉網頁⏳';
+            statusDiv.innerHTML = 'AI 正在努力處理中...<br>這可能需要幾分鐘的時間，請勿關閉網頁⏳';
 
             try {
                 const response = await fetch('/upload', { method: 'POST', body: formData });
@@ -151,7 +161,7 @@
                 previewText.value = data.transcript;
                 previewContainer.style.display = 'block';
                 statusDiv.style.color = 'green';
-                statusDiv.textContent = '✅ 辨識完成！請在下方檢查結果。';
+                statusDiv.textContent = '✅ 處理完成！請在下方檢查結果。';
             } catch (error) {
                 statusDiv.style.color = 'red';
                 statusDiv.textContent = '❌ 錯誤: ' + error.message;

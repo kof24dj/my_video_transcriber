@@ -70,17 +70,39 @@ def upload_video():
     uploaded_file = None
     
     try:
-        print(f"正在將影片上傳至 Gemini 伺服器...")
-        # 為了相容不同版本的 Google SDK，使用多重嘗試機制
-        try:
-            uploaded_file = client.files.upload(file=local_video_path)
-        except TypeError:
-            try:
-                uploaded_file = client.files.upload(path=local_video_path)
-            except TypeError:
-                uploaded_file = client.files.upload(local_video_path)
+        # ✨【核心修正：解決雲端環境 MIME Type 誤判導致 AI 瞎編字幕的問題】
+        ext_lower = ext.lower()
+        mime_type = "video/mp4"  # 預設為 MP4 影片
+        if ext_lower == ".mp3": mime_type = "audio/mp3"
+        elif ext_lower == ".wav": mime_type = "audio/wav"
+        elif ext_lower == ".m4a": mime_type = "audio/x-m4a"
+        elif ext_lower == ".mov": mime_type = "video/quicktime"
+        elif ext_lower == ".webm": mime_type = "video/webm"
+        elif ext_lower == ".avi": mime_type = "video/x-msvideo"
+
+        print(f"本地端暫存成功。準備上傳至 Gemini 雲端，強制指定 MIME Type: {mime_type}")
         
-        print("等待 Gemini 處理影片中...")
+        # 為了相容不同版本的 Google SDK 參數命名，使用多重嘗試機制把 mime_type 灌進去
+        upload_errors = []
+        try:
+            uploaded_file = client.files.upload(file=local_video_path, config={'mime_type': mime_type})
+        except Exception as e1:
+            upload_errors.append(f"寫法1失敗: {e1}")
+            try:
+                uploaded_file = client.files.upload(file=local_video_path, mime_type=mime_type)
+            except Exception as e2:
+                upload_errors.append(f"寫法2失敗: {e2}")
+                try:
+                    uploaded_file = client.files.upload(local_video_path, mime_type=mime_type)
+                except Exception as e3:
+                    upload_errors.append(f"寫法3失敗: {e3}")
+                    try:
+                        uploaded_file = client.files.upload(local_video_path)
+                    except Exception as e4:
+                        upload_errors.append(f"寫法4失敗: {e4}")
+                        raise Exception(f"所有雲端上傳相容模式皆失敗。詳細紀錄: {upload_errors}")
+        
+        print("影片已成功送達 Google 伺服器，等待 Gemini 進行多媒體編碼處理...")
         timeout_counter = 0
         
         # 循環檢查處理狀態是否為 PROCESSING
@@ -92,12 +114,20 @@ def upload_video():
             uploaded_file = client.files.get(name=get_name(uploaded_file))
 
         if get_state(uploaded_file) == "FAILED":
-            raise Exception("Gemini 雲端處理影片失敗。可能是 API 額度用盡或檔案格式損壞。")
+            raise Exception("Gemini 雲端多媒體編碼失敗。請確認影片檔案是否損壞，或音訊編碼是否為常見格式。")
 
-        print(f"正在執行模式：{mode}，開始由 Gemini 產生字幕...")
+        print(f"雲端編碼完成！正在執行模式：{mode}，開始由 Gemini 產生字幕...")
+
+        # ✨【核心修正：加入幻覺防禦指令，避免沒讀到音軌時瞎編故事】
+        guardrail_instruction = (
+            "【絕對重要防禦指令】：請務必『完全根據影片或音訊中的實際語音內容』進行聽寫與翻譯！\n"
+            "絕對不可以憑空捏造、胡亂編造或自行想像任何無關的台詞或對話。\n"
+            "如果發現該影片完全沒有聲音、或者你無法讀取其音軌內容，請『不要輸出任何時間軸』，直接回傳這行字：『❌ 錯誤：無法從該檔案中讀取到任何有效音訊內容，請檢查檔案編碼是否為 H.264/AAC 標準格式。』\n\n"
+        )
 
         if mode == "translate_en_zh":
             prompt = (
+                guardrail_instruction +
                 "請幫我聽這段影片的英文語音，並將其【直接翻譯成繁體中文（台灣習慣用語）】字幕。\n"
                 "請以『單個句子』為單位進行極其精確、細緻的時間軸切分。\n"
                 "【嚴格要求】：只要說話者有短暫停頓、換句、或是語意轉換，就必須分割成新的時間戳記！"
@@ -108,6 +138,7 @@ def upload_video():
             )
         else:
             prompt = (
+                guardrail_instruction +
                 "請幫我將這段影片轉成逐字稿。請以『單個句子』為單位進行極其精確、細緻的時間軸切分。\n"
                 "只要說話者有短暫停頓、換句、或是語意轉換，就必須分割成新的時間戳記！"
                 "絕對不允許將 2-3 句話合併在同一個時間段內。\n\n"

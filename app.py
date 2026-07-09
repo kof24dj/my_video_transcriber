@@ -40,7 +40,6 @@ def upload_video():
     uploaded_file = None
     try:
         print(f"正在將影片上傳至 Gemini 伺服器...")
-        # ✨ 為了相容不同版本的 Google SDK，我們使用多重嘗試機制
         try:
             uploaded_file = client.files.upload(file=local_video_path)
         except TypeError:
@@ -50,12 +49,24 @@ def upload_video():
                 uploaded_file = client.files.upload(local_video_path)
         
         print("等待 Gemini 處理影片中...")
-        while uploaded_file.state.name == "PROCESSING":
-            time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
+        timeout_counter = 0
+        
+        # ✨ 防彈機制：無論新舊 SDK，都能安全抓取狀態和檔名
+        def get_state(f):
+            return f.state.name if hasattr(f.state, 'name') else str(f.state)
+            
+        def get_name(f):
+            return f.name if hasattr(f, 'name') else f['name']
 
-        if uploaded_file.state.name == "FAILED":
-            raise Exception("Gemini 處理影片失敗。可能是 API 額度用盡或檔案格式不支援。")
+        while get_state(uploaded_file) == "PROCESSING":
+            if timeout_counter > 60: 
+                raise Exception("Gemini 處理影片超時，請稍後再試。")
+            time.sleep(2)
+            timeout_counter += 1
+            uploaded_file = client.files.get(name=get_name(uploaded_file))
+
+        if get_state(uploaded_file) == "FAILED":
+            raise Exception("Gemini 處理影片失敗。可能是 API 額度用盡或檔案格式不支援。")敗。可能是 API 額度用盡或檔案格式不支援。")
 
         print(f"正在執行模式：{mode}，開始請 Gemini 處理...")
 

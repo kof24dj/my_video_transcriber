@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>影片語音轉文字 (團隊雲端多功能版)</title>
+    <link rel="shortcut icon" href="#">
     <style>
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -136,14 +137,14 @@
             e.preventDefault();
             const fileInput = document.getElementById('videoFile');
             const apiKeyInput = document.getElementById('apiKey');
-            const modeInput = document.getElementById('mode'); // 取得選單模式
+            const modeInput = document.getElementById('mode');
 
             if (fileInput.files.length === 0) return;
 
             const formData = new FormData();
             formData.append('video', fileInput.files[0]);
             formData.append('api_key', apiKeyInput.value.trim());
-            formData.append('mode', modeInput.value); // ✨ 送出模式
+            formData.append('mode', modeInput.value);
 
             submitBtn.disabled = true;
             previewContainer.style.display = 'none';
@@ -152,11 +153,21 @@
 
             try {
                 const response = await fetch('/upload', { method: 'POST', body: formData });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || '伺服器發生錯誤');
+                
+                // 防崩潰處理：先轉為文字，避免因伺服器報錯吐回 HTML 而導致前端 json() 崩潰
+                const responseText = await response.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error("無法解析的伺服器回應內容:", responseText);
+                    throw new Error("伺服器中斷或回傳非預期格式。請確認 Render 的 Start Command 是否已修改成帶有 --timeout 的指令。");
                 }
-                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '伺服器發生錯誤');
+                }
                 
                 previewText.value = data.transcript;
                 previewContainer.style.display = 'block';
@@ -211,7 +222,7 @@
                 }
             }
             if (!srtOutput) {
-                alert("轉換失敗！請確保格式保持為 [HH:MM:SS - HH:MM:SS] 文字");
+                alert("轉換失敗！請確保預覽區的格式保持為 [HH:MM:SS - HH:MM:SS] 文字");
                 return;
             }
             triggerDownload(srtOutput.trim(), 'transcript.srt', 'text/srt;charset=utf-8');

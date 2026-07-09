@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>影片語音轉文字 (團隊雲端多功能版)</title>
+    <link rel="shortcut icon" href="#">
     <style>
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
@@ -136,14 +137,14 @@
             e.preventDefault();
             const fileInput = document.getElementById('videoFile');
             const apiKeyInput = document.getElementById('apiKey');
-            const modeInput = document.getElementById('mode'); // 取得選單模式
+            const modeInput = document.getElementById('mode');
 
             if (fileInput.files.length === 0) return;
 
             const formData = new FormData();
             formData.append('video', fileInput.files[0]);
             formData.append('api_key', apiKeyInput.value.trim());
-            formData.append('mode', modeInput.value); // ✨ 送出模式
+            formData.append('mode', modeInput.value);
 
             submitBtn.disabled = true;
             previewContainer.style.display = 'none';
@@ -152,11 +153,20 @@
 
             try {
                 const response = await fetch('/upload', { method: 'POST', body: formData });
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || '伺服器發生錯誤');
+                
+                const responseText = await response.text();
+                let data;
+                
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error("無法解析的伺服器回應內容:", responseText);
+                    throw new Error("伺服器中斷或回傳非預期格式。請確認 Render 的 Start Command 是否已修改成帶有 --timeout 的指令。");
                 }
-                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '伺服器發生錯誤');
+                }
                 
                 previewText.value = data.transcript;
                 previewContainer.style.display = 'block';
@@ -187,31 +197,36 @@
             triggerDownload(previewText.value, 'transcript.txt', 'text/plain;charset=utf-8');
         });
 
+        // ✨ 終極寬容版 SRT 轉換邏輯
         downloadSrtBtn.addEventListener('click', () => {
             const textContent = previewText.value;
             const lines = textContent.split('\n');
             let srtOutput = '';
             let counter = 1;
-            const regex = /^\[(\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2})\]\s*(.*)$/;
+            
+            // 超強相容正則：無視前後空格、無視 Markdown 符號、無視結尾冒號
+            const regex = /(\d{2}:\d{2}:\d{2})\s*[-~]+\s*(\d{2}:\d{2}:\d{2})[\]\s:：]*(.*)/;
 
             for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
+                // 清理可能出現的 Markdown 粗體星號
+                let line = lines[i].trim().replace(/\*\*/g, '');
                 if (!line) continue;
                 
                 const match = line.match(regex);
                 if (match) {
                     const start = match[1] + ",000";
                     const end = match[2] + ",000";
-                    const content = match[3];
+                    const content = match[3].trim(); // 抓取剩下的台詞內容
 
                     srtOutput += `${counter}\n${start} --> ${end}\n${content}\n\n`;
                     counter++;
                 } else if (counter > 1) {
+                    // 如果這行沒有時間，但之前已經有字幕了，就當作是上一句話的換行接續
                     srtOutput = srtOutput.trimEnd() + '\n' + line + '\n\n';
                 }
             }
             if (!srtOutput) {
-                alert("轉換失敗！請確保格式保持為 [HH:MM:SS - HH:MM:SS] 文字");
+                alert("轉換失敗！無法從文字中辨識出時間軸。請確認預覽區有類似 00:00:00 - 00:00:05 的時間格式。");
                 return;
             }
             triggerDownload(srtOutput.trim(), 'transcript.srt', 'text/srt;charset=utf-8');

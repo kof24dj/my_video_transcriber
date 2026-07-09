@@ -161,7 +161,7 @@
                     data = JSON.parse(responseText);
                 } catch (parseError) {
                     console.error("無法解析的伺服器回應內容:", responseText);
-                    throw new Error("伺服器中斷或回傳非預期格式。請確認 Render 的 Start Command 是否已修改成帶有 --timeout 的指令。");
+                    throw new Error("伺服器中斷或回傳非預期格式。請確認 Render 的設定無誤。");
                 }
 
                 if (!response.ok) {
@@ -197,36 +197,44 @@
             triggerDownload(previewText.value, 'transcript.txt', 'text/plain;charset=utf-8');
         });
 
-        // ✨ 終極寬容版 SRT 轉換邏輯
+        // ✨ 宇宙級寬容版 SRT 轉換邏輯
         downloadSrtBtn.addEventListener('click', () => {
             const textContent = previewText.value;
             const lines = textContent.split('\n');
             let srtOutput = '';
             let counter = 1;
             
-            // 超強相容正則：無視前後空格、無視 Markdown 符號、無視結尾冒號
-            const regex = /(\d{2}:\d{2}:\d{2})\s*[-~]+\s*(\d{2}:\d{2}:\d{2})[\]\s:：]*(.*)/;
+            // 允許 [00:00:00 - 00:00:05] 或 [00:00 - 00:05] 或 沒有括號，無視多餘符號
+            const regex = /(?:\[)?\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*[-~]+\s*(\d{1,2}:\d{2}(?::\d{2})?)[\]\s:：]*(.*)/;
+
+            // 輔助函數：自動補齊 HH:MM:SS 並加上毫秒
+            function formatTime(timeStr) {
+                let parts = timeStr.split(':');
+                if (parts.length === 2) {
+                    parts.unshift('00'); // 如果只有 分:秒，自動補上 00 小時
+                }
+                // 確保每一段都是兩位數 (例如 5:3 變成 05:03)
+                return parts.map(p => p.padStart(2, '0')).join(':') + ',000';
+            }
 
             for (let i = 0; i < lines.length; i++) {
-                // 清理可能出現的 Markdown 粗體星號
                 let line = lines[i].trim().replace(/\*\*/g, '');
                 if (!line) continue;
                 
                 const match = line.match(regex);
                 if (match) {
-                    const start = match[1] + ",000";
-                    const end = match[2] + ",000";
-                    const content = match[3].trim(); // 抓取剩下的台詞內容
+                    const start = formatTime(match[1]);
+                    const end = formatTime(match[2]);
+                    const content = match[3].trim(); 
 
                     srtOutput += `${counter}\n${start} --> ${end}\n${content}\n\n`;
                     counter++;
                 } else if (counter > 1) {
-                    // 如果這行沒有時間，但之前已經有字幕了，就當作是上一句話的換行接續
                     srtOutput = srtOutput.trimEnd() + '\n' + line + '\n\n';
                 }
             }
             if (!srtOutput) {
-                alert("轉換失敗！無法從文字中辨識出時間軸。請確認預覽區有類似 00:00:00 - 00:00:05 的時間格式。");
+                alert("轉換失敗！無法從文字中辨識出任何時間軸。請確認預覽區有類似 00:00 - 00:05 的時間格式。");
                 return;
             }
             triggerDownload(srtOutput.trim(), 'transcript.srt', 'text/srt;charset=utf-8');

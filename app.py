@@ -2,9 +2,39 @@ import os
 import time
 import uuid
 from flask import Flask, request, render_template, jsonify
+from werkzeug.exceptions import HTTPException
 from google import genai
 
 app = Flask(__name__)
+
+# 設定允許的最大上傳容量為 100MB
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+
+# 萬能防彈機制：攔截所有伺服器錯誤，強制回傳 JSON 格式，避免前端解析失敗
+@app.errorhandler(Exception)
+def handle_exception(e):
+    if isinstance(e, HTTPException):
+        return jsonify(error=e.description), e.code
+    print(f"系統發生嚴重錯誤: {e}")
+    return jsonify(error=f"伺服器內部錯誤: {str(e)}"), 500
+
+# 輔助函數：相容新舊版 SDK 的狀態讀取
+def get_state(f):
+    if not f:
+        return "UNKNOWN"
+    if hasattr(f, 'state') and f.state:
+        return f.state.name if hasattr(f.state, 'name') else str(f.state)
+    return "UNKNOWN"
+
+# 輔助函數：相容新舊版 SDK 的檔案名稱讀取
+def get_name(f):
+    if not f:
+        return ""
+    if hasattr(f, 'name'):
+        return f.name
+    elif isinstance(f, dict) and 'name' in f:
+        return f['name']
+    return str(f)
 
 @app.route('/')
 def index():
@@ -22,14 +52,14 @@ def upload_video():
     if not api_key:
         return jsonify({'error': '請提供 Gemini API Key'}), 400
 
-    # ✨ 接收前端傳過來的模式選擇
     mode = request.form.get('mode', 'transcribe')
 
     try:
         client = genai.Client(api_key=api_key)
     except Exception as e:
-        return jsonify({'error': f'API Key 無效或初始化失敗: {str(e)}'}), 400
+        return jsonify({'error': f'API Key 初始化失敗: {str(e)}'}), 400
 
+    # 產生不重複檔名，避免多人同時使用互相覆蓋
     _, ext = os.path.splitext(video_file.filename)
     if not ext:
         ext = '.mp4'
@@ -38,8 +68,10 @@ def upload_video():
     
     video_file.save(local_video_path)
     uploaded_file = None
+    
     try:
         print(f"正在將影片上傳至 Gemini 伺服器...")
+        # 為了相容不同版本的 Google SDK，使用多重嘗試機制
         try:
             uploaded_file = client.files.upload(file=local_video_path)
         except TypeError:
@@ -51,28 +83,20 @@ def upload_video():
         print("等待 Gemini 處理影片中...")
         timeout_counter = 0
         
-        # ✨ 防彈機制：無論新舊 SDK，都能安全抓取狀態和檔名
-        def get_state(f):
-            return f.state.name if hasattr(f.state, 'name') else str(f.state)
-            
-        def get_name(f):
-            return f.name if hasattr(f, 'name') else f['name']
-
+        # 循環檢查處理狀態是否為 PROCESSING
         while get_state(uploaded_file) == "PROCESSING":
-            if timeout_counter > 60: 
+            if timeout_counter > 90:  # 最多等待約 3 分鐘
                 raise Exception("Gemini 處理影片超時，請稍後再試。")
             time.sleep(2)
             timeout_counter += 1
             uploaded_file = client.files.get(name=get_name(uploaded_file))
 
         if get_state(uploaded_file) == "FAILED":
-            raise Exception("Gemini 處理影片失敗。可能是 API 額度用盡或檔案格式不支援。")敗。可能是 API 額度用盡或檔案格式不支援。")
+            raise Exception("Gemini 雲端處理影片失敗。可能是 API 額度用盡或檔案格式損壞。")
 
-        print(f"正在執行模式：{mode}，開始請 Gemini 處理...")
+        print(f"正在執行模式：{mode}，開始由 Gemini 產生字幕...")
 
-        # ✨【動態 Prompt 機制】
         if mode == "translate_en_zh":
-            # 專門對付英翻中的強力提示詞
             prompt = (
                 "請幫我聽這段影片的英文語音，並將其【直接翻譯成繁體中文（台灣習慣用語）】字幕。\n"
                 "請以『單個句子』為單位進行極其精確、細緻的時間軸切分。\n"
@@ -83,7 +107,6 @@ def upload_video():
                 "[HH:MM:SS - HH:MM:SS] 第二句中文翻譯"
             )
         else:
-            # 原本的精細原語言聽寫提示詞
             prompt = (
                 "請幫我將這段影片轉成逐字稿。請以『單個句子』為單位進行極其精確、細緻的時間軸切分。\n"
                 "只要說話者有短暫停頓、換句、或是語意轉換，就必須分割成新的時間戳記！"
@@ -101,16 +124,21 @@ def upload_video():
         return jsonify({'transcript': response.text})
 
     except Exception as e:
-        print(f"錯誤: {str(e)}")
+        print(f"處理期間發生錯誤: {str(e)}")
         return jsonify({'error': str(e)}), 500
         
     finally:
+        # 清理本地暫存檔
         if os.path.exists(local_video_path):
             try: os.remove(local_video_path)
             except: pass
+        # 清理 Gemini 雲端暫存檔
         if uploaded_file:
-            try: client.files.delete(name=uploaded_file.name)
-            except: pass
+            try: 
+                client.files.delete(name=get_name(uploaded_file))
+                print("已成功刪除 Gemini 雲端暫存檔案")
+            except Exception as delete_error:
+                print(f"刪除雲端檔案時失敗: {delete_error}")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

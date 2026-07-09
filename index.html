@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>影片語音轉文字 (團隊雲端版)</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f7f9fc;
+            padding: 2rem; 
+            display: flex;
+            justify-content: center;
+        }
+        .container { 
+            background: white;
+            border-radius: 12px; 
+            padding: 2rem; 
+            box-shadow: 0 10px 15px rgba(0,0,0,0.05); 
+            text-align: center;
+            max-width: 700px;
+            width: 100%;
+        }
+        h1 { font-size: 1.5rem; color: #333; margin-bottom: 1.5rem; }
+        
+        /* 新增 API Key 輸入框樣式 */
+        .api-key-group {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        .api-key-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #555;
+            font-weight: bold;
+        }
+        .api-key-group input[type="password"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-family: monospace;
+        }
+
+        input[type="file"] { 
+            display: block; 
+            margin: 0 auto 1.5rem auto; 
+            padding: 0.5rem;
+        }
+        button { 
+            color: white; 
+            border: none; 
+            padding: 0.75rem 2rem; 
+            font-size: 1rem;
+            cursor: pointer; 
+            border-radius: 6px; 
+            transition: background-color 0.2s;
+            margin: 0.5rem 0;
+            width: 100%;
+        }
+        button:disabled { background-color: #a0c4ff !important; cursor: not-allowed; }
+        #submitBtn { background-color: #0066ff; }
+        #submitBtn:hover { background-color: #0052cc; }
+        
+        #status { margin-top: 1.5rem; color: #555; font-size: 0.95rem; min-height: 1.5em;}
+        
+        #previewContainer {
+            margin-top: 2rem;
+            text-align: left;
+            display: none; 
+        }
+        #previewContainer h3 { color: #333; margin-bottom: 0.5rem; }
+        #previewText {
+            width: 100%;
+            height: 300px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 14px;
+            resize: vertical;
+            box-sizing: border-box;
+            background-color: #fafafa;
+        }
+        .button-group { display: flex; gap: 10px; margin-top: 1rem; }
+        .btn-txt { background-color: #6c757d; flex: 1; }
+        .btn-txt:hover { background-color: #5a6268; }
+        .btn-srt { background-color: #ff9900; flex: 1; color: #222; font-weight: bold;}
+        .btn-srt:hover { background-color: #e68a00; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>上傳影片產生逐字稿</h1>
+        <form id="uploadForm">
+            <div class="api-key-group">
+                <label for="apiKey">🔑 請輸入您的 Gemini API Key：</label>
+                <input type="password" id="apiKey" name="apiKey" placeholder="AIzaSy..." required>
+            </div>
+
+            <input type="file" id="videoFile" accept="video/*,audio/*" required>
+            <button type="submit" id="submitBtn">開始辨識</button>
+        </form>
+        <div id="status"></div>
+
+        <div id="previewContainer">
+            <h3>📝 逐字稿預覽 (可直接修改錯字)：</h3>
+            <textarea id="previewText"></textarea>
+            
+            <div class="button-group">
+                <button id="downloadTxtBtn" class="btn-txt">📄 下載純文字 (.txt)</button>
+                <button id="downloadSrtBtn" class="btn-srt">🎬 下載字幕檔 (.srt)</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const statusDiv = document.getElementById('status');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewText = document.getElementById('previewText');
+        const downloadTxtBtn = document.getElementById('downloadTxtBtn');
+        const downloadSrtBtn = document.getElementById('downloadSrtBtn');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('videoFile');
+            const apiKeyInput = document.getElementById('apiKey'); // 取得 API Key
+
+            if (fileInput.files.length === 0) return;
+
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+            formData.append('api_key', apiKeyInput.value.trim()); // ✨ 將 API Key 包裝送出
+
+            submitBtn.disabled = true;
+            previewContainer.style.display = 'none';
+            statusDiv.style.color = '#555';
+            statusDiv.innerHTML = 'AI 正在努力聽寫中...<br>這可能需要幾分鐘的時間，請勿關閉網頁⏳';
+
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '伺服器發生錯誤');
+                }
+                const data = await response.json();
+                
+                previewText.value = data.transcript;
+                previewContainer.style.display = 'block';
+                statusDiv.style.color = 'green';
+                statusDiv.textContent = '✅ 辨識完成！請在下方檢查結果。';
+            } catch (error) {
+                statusDiv.style.color = 'red';
+                statusDiv.textContent = '❌ 錯誤: ' + error.message;
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+
+        function triggerDownload(content, filename, mimeType) {
+            const blob = new Blob([content], { type: mimeType });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        downloadTxtBtn.addEventListener('click', () => {
+            triggerDownload(previewText.value, 'transcript.txt', 'text/plain;charset=utf-8');
+        });
+
+        downloadSrtBtn.addEventListener('click', () => {
+            const textContent = previewText.value;
+            const lines = textContent.split('\n');
+            let srtOutput = '';
+            let counter = 1;
+            const regex = /^\[(\d{2}:\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}:\d{2})\]\s*(.*)$/;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const match = line.match(regex);
+                if (match) {
+                    const start = match[1] + ",000";
+                    const end = match[2] + ",000";
+                    const content = match[3];
+
+                    srtOutput += `${counter}\n${start} --> ${end}\n${content}\n\n`;
+                    counter++;
+                } else if (counter > 1) {
+                    srtOutput = srtOutput.trimEnd() + '\n' + line + '\n\n';
+                }
+            }
+            if (!srtOutput) {
+                alert("轉換失敗！請確保格式保持為 [HH:MM:SS - HH:MM:SS] 文字");
+                return;
+            }
+            triggerDownload(srtOutput.trim(), 'transcript.srt', 'text/srt;charset=utf-8');
+        });
+    </script>
+</body>
+</html>
